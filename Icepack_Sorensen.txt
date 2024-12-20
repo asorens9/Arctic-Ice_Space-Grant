@@ -1,0 +1,138 @@
+# Pre's from Vargas New_Data
+def day_to_hour(day):
+    start = datetime(2021, 1, 1, 1, 0, 0)
+    return int((day - start).total_seconds() // 3600)
+
+def get_days(ds):
+    start = datetime(2006, 1, 1)
+    min_date = datetime(2021, 1, 1, 0, 0, 0)
+    max_date = datetime(2031, 1, 1, 0, 0, 0)
+    times = [start + timedelta(days=d) for d in ds['time'][:]]
+    times = list(filter(lambda d: min_date <= d < max_date, times))
+    return times
+
+def interp_years(data, ds, years):
+    days = get_days(ds)
+    xp = np.array([day_to_hour(day) for day in days])
+    x = np.arange(1, years * 365 * 24 + 1)
+    f = np.interp(x, xp, data)
+    return f
+
+def get_atm_forcing(path, s, lat_ind, lon_ind):
+    key = path.split('_')[0] 
+    print(f'{key}')
+    key = key.split('\\')[-1] # Change 1
+    key = key.split('/')[-1]
+    print(f'{key}')
+    ds = netCDF4.Dataset(path)
+    lat = ds.variables['lat'][:].data[lat_ind]
+    lon = ds.variables['lon'][:].data[lon_ind]
+    _forcing = ds.variables[key][s, lat_ind, lon_ind].data
+    forcing = interp_years(_forcing, ds, 10)
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.add_subplot(121)
+    ax.plot(forcing)
+    ax.set_title(key)
+    ax = fig.add_subplot(122)
+    ax.plot(_forcing)
+    ax.set_title(key)
+    print(f'{key} : {ds.variables[key].units}')
+    # forcing = forcing.round(5)
+    ds.close()
+    return key, forcing, lat, lon
+
+def make_atm_forcing(paths, lat_ind, lon_ind):
+    # Slice two years 2016-2020
+    s = slice(0, 365 * 10 + 4)
+    atm = {}
+    for path in paths:
+        key, forcing, lat, lon = get_atm_forcing(path, s, lat_ind, lon_ind)
+        atm[key] = forcing
+    # print(atm['rsds'])
+    df = pd.DataFrame(atm, columns=list(atm.keys()))
+    df.to_csv(f'atm_{lat:.0f}_{lon:.0f}_10years.txt', sep=' ', header=None, index=False, float_format='%.6f')
+    return df
+
+def get_ocn_forcing(path, s, ind1, ind2):
+    key = path.split('_')[0]
+    key = key.split('\\')[-1]  # Handle Windows paths
+    key = key.split('/')[-1]  # Handle Unix paths
+    with netCDF4.Dataset(path) as ds:
+        # Extract latitude and longitude
+        lat = ds.variables['lat'][:].data[ind1, ind2]
+        lon = ds.variables['lon'][:].data[ind1, ind2]
+        data = ds.variables[key][:].data
+
+        # Check data dimensions
+        if data.ndim == 4:
+            forcing = data[s, 0, ind1, ind2]
+        elif data.ndim == 3:
+            forcing = data[s, ind1, ind2]
+        else:
+            raise ValueError(f"Unexpected data dimensions: {data.ndim}D")
+
+        # Interpolate for 10 years
+        forcing = interp_years(forcing, ds, 10)
+
+        # Debugging
+        print(f"Processed variable: {key}, Shape: {data.shape}")
+        print(f"Original forcing data: {forcing[:20]} ... {forcing[-20:]}")
+
+        # Plot
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(forcing)
+        ax.set_title(key)
+        print(f'{key} : {ds.variables[key].units}')
+        return key, forcing, lat, lon
+
+
+def make_ocn_forcing(paths, ind1, ind2):
+    s = slice(0, 12*10)  # Adjust based on dataset time steps
+    ocn = {}
+    for path in paths:
+        try:
+            key, forcing, lat, lon = get_ocn_forcing(path, s, ind1, ind2)
+            ocn[key] = forcing
+        except Exception as e:
+            print(f"Failed to process {path}: {e}")
+    if ocn:
+        df = pd.DataFrame(ocn, columns=list(ocn.keys()))
+        df.to_csv(f'ocn_{lat:.0f}_{lon:.0f}_10years.txt', sep=' ', header=None, index=False,
+                  float_format='%.6f')
+        return df
+    else:
+        print("No data processed.")
+
+
+def get_bgc_forcing(path, s, ind1, ind2):
+    key = path.split('_')[0]
+    key = key.split('\\')[-1]
+    key = key.split("/")[-1]
+    ds = netCDF4.Dataset(path)
+    lat = ds.variables['lat'][:].data[ind1, ind2]
+    lon = ds.variables['lon'][:].data[ind1, ind2]
+    data = ds.variables[key][:].data
+    if data.ndim == 4:
+        forcing = data[s, 0 , ind1, ind2] * 1000
+    else:
+        forcing = data[s, ind1, ind2] * 1000
+    print(f'{key} : {ds.variables[key].units}')
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.plot(forcing)
+    ax.set_title(key)
+    # forcing = forcing.round(5)
+    ds.close()
+    return key, forcing, lat, lon
+
+def make_bgc_forcing(paths, ind1, ind2):
+    s = slice(0, 60)
+    ocn = {}
+    for path in paths:
+        key, forcing, lat, lon = get_bgc_forcing(path, s, ind1, ind2)
+        ocn[key] = forcing
+    df = pd.DataFrame(ocn, columns=list(ocn.keys()))
+    df.to_csv(f'bgc_{lat:.0f}_{lon:.0f}_5years.txt', sep=' ', header=None, index=False,
+float_format='%.6f')
+    return df
